@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>나눔교실 · 디자인 제안 01</title>
+    <link rel="icon" type="image/svg+xml" href="../favicon.svg" />
+    <link rel="stylesheet" href="./tokens.css" />
+    <link rel="stylesheet" href="./review.css" />
+    <script type="module" src="./review.js"></script>
+  </head>
+  <body>
+    <header class="review-header">
+      <a class="review-brand" href="#screen"><img src="../favicon.svg" alt="" width="30" height="30" /><span>나눔교실 <span class="review-subtitle">디자인 제안 01</span></span></a>
+      <nav class="review-tabs" role="tablist" aria-label="디자인 검토">
+        <button id="screen-tab" role="tab" aria-selected="true" aria-controls="screen-panel" data-tab="screen">입력 화면</button>
+        <button id="system-tab" role="tab" aria-selected="false" aria-controls="system-panel" tabindex="-1" data-tab="system">공통 디자인 규칙</button>
+      </nav>
+    </header>
+
+    <main>
+      <section id="screen-panel" role="tabpanel" aria-labelledby="screen-tab">
+        <div class="preview-toolbar">
+          <p>명단에 집중하는 배치 · 선명한 글자 · 필요한 곳의 반투명</p>
+          <div class="preview-actions">
+            <div class="width-switch" role="group" aria-label="미리보기 너비">
+              <button type="button" data-width="auto" aria-pressed="true">화면에 맞춤</button>
+              <button type="button" data-width="narrow" aria-pressed="false">좁은 화면</button>
+            </div>
+            <a href="./input.html" target="_blank" rel="noopener">별도 탭에서 열기 <span aria-hidden="true">↗</span></a>
+          </div>
+        </div>
+        <div class="preview-stage" data-width="auto">
+          <iframe id="design-frame" src="./input.html" title="나눔교실 입력 화면 디자인 시안"></iframe>
+        </div>
+        <p class="preview-note">입력칸은 기존 프로그램을 사용합니다. 공개 사이트의 명단과는 다른 로컬 주소에 저장됩니다.</p>
+      </section>
+
+      <section id="system-panel" role="tabpanel" aria-labelledby="system-tab" hidden>
+        <div class="system-page">
+          <header class="system-intro"><span class="section-kicker">나눔교실 웹 · 밝은 화면</span><h1>공통 디자인 규칙</h1><p>명단을 편안하게 읽고, 다음 행동을 분명하게 찾을 수 있는 작업 화면을 만듭니다.</p></header>
+
+          <section class="rule-section" aria-labelledby="color-title">
+            <div class="section-heading"><div><span class="section-number">01</span><h2 id="color-title">색상</h2></div><p>중립적인 배경과 글자, 주요 동작에 쓰는 파란색.</p></div>
+            <div class="palette">
+              <figure><div class="swatch" style="--swatch:var(--ds-canvas)"></div><figcaption>작업 배경 <span>#F5F5F7</span></figcaption></figure>
+              <figure><div class="swatch" style="--swatch:var(--ds-surface)"></div><figcaption>내용 영역 <span>#FFFFFF</span></figcaption></figure>
+              <figure><div class="swatch" style="--swatch:var(--ds-text)"></div><figcaption>본문 <span>#1D1D1F</span></figcaption></figure>
+              <figure><div class="swatch" style="--swatch:var(--ds-text-secondary)"></div><figcaption>보조 설명 <span>#616166</span></figcaption></figure>
+              <figure><div class="swatch" style="--swatch:var(--ds-accent)"></div><figcaption>주요 동작 <span>#0066D6</span></figcaption></figure>
+              <figure><div class="swatch" style="--swatch:var(--ds-selection)"></div><figcaption>선택 영역 <span>#E8F0FC</span></figcaption></figure>
+            </div>
+            <div class="status-examples" aria-label="상태 표시"><span class="status-label success">✓ 1지망 배정</span><span class="status-label warning">! 미지망 배정</span><span class="status-label danger">! 입력 확인 필요</span><p>상태는 색과 글자를 함께 사용합니다.</p></div>
+          </section>
+
+          <section class="rule-section" aria-labelledby="type-title">
+            <div class="section-heading"><div><span class="section-number">02</span><h2 id="type-title">글자</h2></div><p>각 기기의 시스템 글꼴을 사용합니다.</p></div>
+            <div class="type-scale">
+              <div><span class="type-role">화면 제목 <small>26px · 650</small></span><p class="type-title">나누미 입력</p></div>
+              <div><span class="type-role">영역 제목 <small>16px · 600</small></span><p class="type-section">우리의 지망 목록</p></div>
+              <div><span class="type-role">본문·입력 <small>14px · 400</small></span><p class="type-body">이름과 1지망을 입력해 주세요.</p></div>
+              <div><span class="type-role">도움말 <small>12px · 400</small></span><p class="type-caption">중요한 명단은 CSV로 저장해 주세요.</p></div>
+            </div>
+          </section>
+
+          <section class="rule-section" aria-labelledby="control-title">
+            <div class="section-heading"><div><span class="section-number">03</span><h2 id="control-title">버튼과 입력칸</h2></div><p>주요 동작 한 가지에만 채운 파란 버튼을 사용합니다.</p></div>
+            <div class="component-sheet">
+              <div class="component-row"><span class="component-role">주요 동작</span><button type="button" class="specimen primary" data-specimen="주요 버튼 · 높이 40px · 캡슐 형태">배정 실행 <span aria-hidden="true">→</span></button><span class="component-description">배정 실행 · 결과 저장</span></div>
+              <div class="component-row"><span class="component-role">보조 동작</span><button type="button" class="specimen" data-specimen="보조 버튼 · 높이 36px · 모서리 8px">CSV 불러오기</button><span class="component-description">불러오기 · 붙여넣기</span></div>
+              <div class="component-row"><span class="component-role">낮은 강조</span><button type="button" class="specimen tertiary" data-specimen="텍스트 버튼 · 색으로 동작을 구분">입력 양식 받기</button><span class="component-description">양식 받기 · 배정 기준</span></div>
+              <div class="component-row"><span class="component-role">사용 불가</span><button type="button" class="specimen" disabled>결과 저장</button><span class="component-description">사용 불가 상태를 분명히 구분</span></div>
+              <div class="component-row"><label class="component-role" for="specimen-name">입력칸</label><input id="specimen-name" class="specimen-input" placeholder="이름 입력" autocomplete="off" /><span class="component-description">기본 높이 36px · 본문 14px</span></div>
+              <div class="component-row"><label class="component-role" for="specimen-preference">선택상자</label><select id="specimen-preference" class="specimen-input"><option value="">선택해 주세요</option><option>국어</option><option>수학</option><option>영어</option><option>사탐</option><option>과탐</option></select><span class="component-description">기기의 기본 선택 메뉴 사용</span></div>
+            </div>
+            <output id="specimen-output" class="specimen-output" aria-live="polite">버튼을 선택하면 규격을 볼 수 있습니다. Tab 키로 이동하면 키보드 선택 표시가 보입니다.</output>
+          </section>
+
+          <section class="rule-section" aria-labelledby="spacing-title">
+            <div class="section-heading"><div><span class="section-number">04</span><h2 id="spacing-title">간격과 형태</h2></div><p>부품마다 임의의 값을 늘리지 않고 정해진 규격을 반복합니다.</p></div>
+            <div class="spacing-scale" aria-label="간격 기준, 픽셀 단위">
+              <div><span style="width:4px"></span><p>4px<small>밀접한 요소</small></p></div>
+              <div><span style="width:8px"></span><p>8px<small>아이콘과 글자</small></p></div>
+              <div><span style="width:12px"></span><p>12px<small>입력칸 안쪽</small></p></div>
+              <div><span style="width:16px"></span><p>16px<small>요소 사이</small></p></div>
+              <div><span style="width:24px"></span><p>24px<small>영역 사이</small></p></div>
+              <div><span style="width:32px"></span><p>32px<small>화면 여백</small></p></div>
+            </div>
+            <div class="shape-scale"><div style="border-radius:8px">입력·보조 버튼 <strong>8px</strong></div><div style="border-radius:14px">내용 영역 <strong>14px</strong></div><div style="border-radius:999px">주요 버튼 <strong>캡슐</strong></div></div>
+          </section>
+
+          <section class="rule-section principles" aria-labelledby="principle-title">
+            <div class="section-heading"><div><span class="section-number">05</span><h2 id="principle-title">화면에 적용하는 원칙</h2></div></div>
+            <ol><li><strong>명단이 중심입니다.</strong><span>통계는 한 줄로 요약하고, 입력 표에 공간을 줍니다.</span></li><li><strong>탐색과 내용을 구분합니다.</strong><span>반투명은 상단 도구 막대와 탐색 영역에 사용하고, 명단 표는 불투명하게 유지합니다.</span></li><li><strong>작은 글자를 옅게 처리하지 않습니다.</strong><span>도움말도 읽을 수 있는 크기와 대비를 유지합니다.</span></li><li><strong>조작 상태를 함께 설계합니다.</strong><span>키보드 선택 표시, 눌림, 사용 불가, 오류 상태를 공통 규칙으로 관리합니다.</span></li></ol>
+          </section>
+
+          <section class="rule-section figma-section" aria-labelledby="figma-title">
+            <div class="section-heading"><div><span class="section-number">06</span><h2 id="figma-title">Figma와 함께 관리하기</h2></div></div>
+            <p>색상은 공통 변수, 글자는 텍스트 스타일, 버튼·입력칸은 재사용 부품으로 정리할 수 있습니다. 먼저 이 시안의 방향을 결정한 뒤 같은 규칙을 Figma에 옮기면 됩니다.</p>
+            <div class="figma-mapping"><span>색상 변수 <code>Color / Text / Primary</code></span><span>글자 스타일 <code>Type / Body</code></span><span>버튼 부품 <code>Button / Type / State</code></span></div>
+            <p class="reference-links">참고: <a href="https://developer.apple.com/design/human-interface-guidelines/materials" target="_blank" rel="noopener noreferrer">Apple 재질 지침</a><a href="https://developer.apple.com/design/human-interface-guidelines/accessibility" target="_blank" rel="noopener noreferrer">Apple 접근성 지침</a><a href="https://help.figma.com/hc/en-us/articles/14548865734679-Lesson-3-Build-your-design-system" target="_blank" rel="noopener noreferrer">Figma 디자인 시스템</a></p>
+          </section>
+          <footer class="system-footer">위 수치는 나눔교실 웹을 위한 제안값이며, Apple의 고정 규격을 뜻하지 않습니다.</footer>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>

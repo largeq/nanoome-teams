@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <base href="../" />
+    <title>나눔교실 · 입력 화면 시안</title>
+    <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
+    <link rel="stylesheet" href="./styles.css" />
+    <link rel="stylesheet" href="./design/tokens.css" />
+    <link rel="stylesheet" href="./design/input.css" />
+    <script type="module" src="./app.js"></script>
+    <script>
+      document.addEventListener("click", (event) => {
+        if (event.target.closest(".brand")) {
+          event.preventDefault();
+          location.reload();
+        }
+        if (event.target.closest(".skip-link")) {
+          event.preventDefault();
+          document.querySelector("#main")?.focus();
+        }
+      }, { capture: true });
+    </script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">본문으로 건너뛰기</a>
+    <div id="app"></div>
+    <noscript>시안을 보려면 브라우저에서 JavaScript를 허용해 주세요.</noscript>
+  </body>
+</html>
