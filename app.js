@@ -147,7 +147,7 @@ function dialogs() {
 }
 
 function render() {
-  root.innerHTML = `<div class="app-shell">${sidebar()}<main id="main" tabindex="-1"><header class="topbar"><span>나눔교실 <span class="breadcrumb">/</span> 팀 배정</span><button class="text-button" data-action="help">${icon("help")}배정 기준</button></header><div class="workspace"><div id="notice" class="notice hidden" tabindex="-1"></div>${state.tab === "input" ? inputView() : state.tab === "result" ? resultView() : settingsView()}<footer class="page-footer"><span>각자의 마음을 모아, 함께하는 나눔교실.</span><span>PHRONESIS · NANUM CLASS</span></footer></div></main></div>${dialogs()}`;
+  root.innerHTML = `<div class="app-shell">${sidebar()}<main id="main" tabindex="-1"><header class="topbar"><span>나눔교실 <span class="breadcrumb">/</span> 팀 배정</span><button class="text-button" data-action="help">${icon("help")}배정 기준</button></header><div class="workspace"><div id="notice" class="notice hidden" tabindex="-1"></div>${state.tab === "input" ? inputView() : state.tab === "result" ? resultView() : settingsView()}<footer class="page-footer"><span>각자의 마음을 모아, 함께하는 나눔교실.</span><nav class="footer-links" aria-label="이용 조건 및 의견"><a href="./LICENSE.txt" target="_blank" rel="noopener">비상업적 이용 조건</a><a href="https://github.com/largeq/nanoome-teams/issues" target="_blank" rel="noopener noreferrer">후기·의견</a><span>PHRONESIS · NANUM CLASS</span></nav></footer></div></main></div>${dialogs()}`;
   renderNotice();
 }
 
