@@ -18,7 +18,7 @@ function guessDelimiter(text) {
   return Object.keys(counts).reduce((best, delimiter) => counts[delimiter] > counts[best] ? delimiter : best, ",");
 }
 
-export function parseCsv(raw) {
+export function parseCsv(raw, { keepEmptyRows = false } = {}) {
   if (typeof raw !== "string" || raw.length > MAX_TEXT_SIZE) throw new InputError(["파일은 2MB 이하의 CSV 또는 탭으로 구분된 텍스트를 사용해 주세요."]);
   const text = raw.replace(/^\uFEFF/, "");
   const delimiter = guessDelimiter(text);
@@ -26,7 +26,7 @@ export function parseCsv(raw) {
   let row = [], cell = "", quoted = false, closed = false;
   const pushRow = () => {
     row.push(cell);
-    if (row.some((value) => value.trim())) rows.push(row);
+    if (keepEmptyRows || row.some((value) => value.trim())) rows.push(row);
     row = []; cell = ""; closed = false;
   };
   for (let i = 0; i < text.length; i++) {
@@ -49,7 +49,7 @@ export function parseCsv(raw) {
     } else cell += char;
   }
   if (quoted) throw new InputError(["CSV에 닫히지 않은 따옴표가 있습니다."]);
-  pushRow();
+  if (row.length || cell.length || closed) pushRow();
   return rows;
 }
 
