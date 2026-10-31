@@ -69,7 +69,7 @@ export function planClipboardPaste(text, volunteers, config, startIndex = 0) {
     const row = { ...previous, ...values };
     if (row.name.length > 100) errors.push((index + 1) + "번: 이름은 100자 이내로 입력해 주세요.");
     if (config.preference_mode === "two" && values.pref3) {
-      errors.push((index + 1) + "번: 3지망이 포함되어 있습니다. 설정에서 1~3지망으로 바꾸거나 3지망 열을 제외해 주세요.");
+      errors.push((index + 1) + "번: 3지망이 포함되어 있습니다. 명단 입력의 ‘받을 지망 수’를 1~3지망으로 바꾸거나 3지망 열을 제외해 주세요.");
     }
     for (const field of preferenceFields) {
       if (row[field] && !allowed.has(row[field])) {

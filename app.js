@@ -3,13 +3,15 @@ import { planClipboardPaste } from "./clipboard.js";
 import { toCsv } from "./csv.js";
 
 const STORAGE_KEY = "phronesis.nanoome-allocation.v1";
+const SUPPORT_EMAIL = "anglers-jazzier-9z@icloud.com";
 const root = document.querySelector("#app");
 const state = {
-  config: defaultConfig(), volunteers: emptyVolunteers(20), programs: [],
+  config: defaultConfig(), volunteers: [], programs: [],
   result: null, resultConfig: null, resultStale: false, tab: "input", draft: null,
-  notice: null, capacityMode: "auto", saveStatus: "이 브라우저에 자동 저장", storageAvailable: true,
+  notice: null, saveStatus: "이 브라우저에 자동 저장", storageAvailable: true,
 };
 state.programs = state.config.subjects.map((subject, index) => ({ ...subject, key: "program-" + index, enabled: true }));
+state.volunteers = emptyVolunteers(totalCapacity(state.config));
 let saveTimer, dragDepth = 0;
 
 const icons = {
@@ -41,13 +43,13 @@ function syncConfig() {
   state.config.subjects = enabledPrograms().map(({ name, capacity }) => ({ name, capacity }));
 }
 
-function redistribute() {
-  const programs = enabledPrograms(), count = state.volunteers.length;
-  programs.forEach((program, index) => {
-    program.capacity = Math.floor(count / programs.length) + (index < count % programs.length ? 1 : 0);
-  });
-  state.capacityMode = "auto";
-  syncConfig();
+function resizeVolunteers(count, volunteers = state.volunteers) {
+  return Array.from({ length: count }, (_, index) => volunteers[index] ? { ...volunteers[index] } : normalizeVolunteer({}));
+}
+
+function removedRowsMessage(count) {
+  const dropped = state.volunteers.slice(count).filter(rowHasInput).length;
+  return dropped ? "정원을 줄이면 마지막 " + dropped + "명의 입력 내용이 삭제됩니다." : "";
 }
 
 function restore() {
@@ -62,11 +64,20 @@ function restore() {
       new Set(programs.map((program) => program.key)).size !== programs.length ||
       new Set(programs.map((program) => program.name)).size !== programs.length) throw new Error("저장 과목 오류");
     const subjects = programs.filter((program) => program.enabled).map(({ name, capacity }) => ({ name, capacity }));
-    if (JSON.stringify(subjects) !== JSON.stringify(config.subjects) || subjects.length > saved.volunteers.length) throw new Error("저장 과목 불일치");
+    if (JSON.stringify(subjects) !== JSON.stringify(config.subjects)) throw new Error("저장 과목 불일치");
+    const volunteers = saved.volunteers.map(normalizeVolunteer);
     state.config = config;
     state.programs = programs.map((program) => ({ ...program }));
-    state.volunteers = saved.volunteers.map(normalizeVolunteer);
-    state.capacityMode = saved.capacityMode === "manual" ? "manual" : "auto";
+    state.volunteers = volunteers;
+    // Older versions saved roster size separately; preserve every filled row.
+    const occupied = volunteers.reduce((last, row, index) => rowHasInput(row) ? index + 1 : last, 0);
+    if (occupied > totalCapacity(state.config)) {
+      const program = enabledPrograms().at(-1);
+      program.capacity += occupied - totalCapacity(state.config);
+      syncConfig();
+      state.notice = { kind: "info", messages: ["저장된 명단을 모두 유지하도록 " + program.name + " 정원을 " + program.capacity + "명으로 조정했습니다. 과목별 정원을 확인해 주세요."] };
+    }
+    state.volunteers = resizeVolunteers(totalCapacity(state.config));
     state.saveStatus = "지난 명단을 불러왔습니다";
   } catch {
     state.notice = { kind: "info", messages: ["저장된 명단을 불러오지 못했습니다. 보관한 CSV나 엑셀 명단이 있다면 불러와 주세요."] };
@@ -76,7 +87,7 @@ function restore() {
 function save() {
   clearTimeout(saveTimer);
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ version: 2, config: state.config, programs: state.programs, volunteers: state.volunteers, capacityMode: state.capacityMode }));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ version: 3, config: state.config, programs: state.programs, volunteers: state.volunteers }));
     state.storageAvailable = true; state.saveStatus = "이 브라우저에 저장됨";
   } catch {
     state.storageAvailable = false; state.saveStatus = "자동 저장 불가 · CSV로 저장해 주세요";
@@ -122,7 +133,7 @@ function sidebar() {
   return '<aside class="sidebar" aria-label="작업 메뉴">' +
     '<a class="brand" href="./" aria-label="나눔교실 팀 배정 처음 화면"><img src="./favicon.svg?v=nanum-hands" width="38" height="38" alt=""/><span>나눔교실<small>PHRONESIS</small></span></a>' +
     '<nav class="navigation" aria-label="주요 메뉴">' +
-    [["input","팀 배정"],["settings","설정"]].map(([tab,label]) => '<button class="nav-item ' + (state.tab === tab ? "active" : "") + '" data-tab="' + tab + '" ' + (state.tab === tab ? 'aria-current="page"' : "") + '><span>' + label + "</span></button>").join("") +
+    [["input","팀 배정"],["about","서비스 소개"]].map(([tab,label]) => '<button class="nav-item ' + (state.tab === tab ? "active" : "") + '" data-tab="' + tab + '" ' + (state.tab === tab ? 'aria-current="page"' : "") + '><span>' + label + "</span></button>").join("") +
     '</nav><div class="sidebar-bottom"><span class="status-dot"></span><span id="save-status">' + escape(state.saveStatus) + "</span></div></aside>";
 }
 
@@ -134,38 +145,36 @@ function stepper({ value, label, field, index = "", min = 1, max = MAX_VOLUNTEER
 }
 
 function conditionsView() {
-  const count = state.volunteers.length, capacity = totalCapacity(state.config), programs = enabledPrograms();
+  const capacity = totalCapacity(state.config);
   return '<section class="setup-card input-only" aria-labelledby="conditions-title">' +
     '<div class="flow-heading"><h2 id="conditions-title"><span class="flow-number">01</span>배정 조건</h2></div>' +
-    '<div class="setup-fields"><div><label class="flow-label" for="stepper-count">배정할 인원</label><div class="count-control">' +
-    stepper({ value: count, label: "배정 인원", field: "count", min: programs.length }) + '<span>명</span></div></div>' +
-    '<div><span class="flow-label">배정할 과목</span><div class="subject-picks" role="group" aria-label="배정에 사용할 과목">' +
+    '<div><div class="subject-heading"><span class="flow-label">배정할 과목</span><button class="text-button" data-action="' + (state.draft ? "cancel-programs" : "edit-programs") + '" aria-expanded="' + Boolean(state.draft) + '" aria-controls="program-editor">' + (state.draft ? "편집 닫기" : "과목 편집") + '</button></div><div class="subject-picks" role="group" aria-label="배정에 사용할 과목">' +
     state.programs.map((program, index) => '<button class="subject-pick" data-action="toggle-program" data-program="' + index + '" aria-pressed="' + program.enabled + '">' + (program.enabled ? icon("check") : "") + escape(program.name) + "</button>").join("") +
-    '</div><p class="flow-help">과목 이름은 설정에서 바꿀 수 있어요.</p></div></div>' +
-    '<div class="capacity-heading"><span class="flow-label">과목별 정원</span><button class="text-button" data-action="balance">균등하게 나누기</button></div><div class="capacity-grid">' +
+    '</div></div>' + programEditorView() +
+    '<div class="capacity-heading"><span class="flow-label">배정할 인원</span><output class="capacity-total" aria-label="총 배정 인원" aria-live="polite" aria-atomic="true">총 <strong>' + capacity + '</strong>명</output></div><div class="capacity-grid">' +
     state.programs.flatMap((program, index) => program.enabled ? ['<div class="capacity-item"><label for="stepper-capacity-' + index + '">' + escape(program.name) + "</label>" + stepper({ value: program.capacity, label: program.name + " 정원", field: "capacity", index, max: MAX_VOLUNTEERS - capacity + program.capacity }) + "</div>"] : []).join("") +
-    '</div><div class="conditions-summary"><strong class="' + (count === capacity ? "" : "capacity-mismatch") + '">정원 합계 ' + capacity + "명 / 배정 인원 " + count + "명" + (count === capacity ? " · 일치해요" : " · 정원을 맞춰 주세요") + '</strong><span>인원·과목을 바꾸면 정원을 다시 나눠요.</span></div></section>';
+    '</div></section>';
 }
 
 function preferenceCell(row, index, rank) {
   const field = "pref" + rank, selected = row[field];
-  return '<td class="preference-input"><span class="preference-label">' + rank + "지망" + (rank === 1 ? " · 필수" : " · 선택") + '</span><fieldset class="preference-options"><legend class="sr-only">' + (index + 1) + "번 " + rank + "지망</legend>" +
+  return '<td class="preference-input"><span class="preference-label">' + rank + "지망" + '</span><fieldset class="preference-options"><legend class="sr-only">' + (index + 1) + "번 " + rank + "지망</legend>" +
     state.config.subjects.map((subject, subjectIndex) => {
       const disabled = ["pref1","pref2","pref3"].some((other, otherIndex) => other !== field && otherIndex < modeCount() && row[other] === subject.name);
       return '<label class="preference-option"><input type="radio" name="preference-' + index + "-" + rank + '" data-index="' + index + '" data-field="' + field + '" value="' + escape(subject.name) + '" ' + (selected === subject.name ? "checked " : "") + (disabled ? "disabled " : "") + '/><span>' + escape(subject.name) + "</span></label>";
-    }).join("") + '</fieldset>' + (rank > 1 ? '<button class="preference-clear" data-action="clear-preference" data-index="' + index + '" data-field="' + field + '" ' + (!selected ? "disabled" : "") + ' aria-label="' + (index + 1) + "번 " + rank + '지망 선택 해제">해제</button>' : "") + "</td>";
+    }).join("") + "</fieldset></td>";
 }
 
 function inputView() {
   const completed = state.volunteers.filter((row) => row.name.trim() && row.pref1).length;
-  return '<div class="allocation-flow"><section class="intro input-only"><div class="eyebrow">나눔교실 팀 배정</div><h1 id="page-title">함께할 팀을 정해요.</h1><p>조건을 정하고, 명단과 지망을 입력해 주세요.</p></section>' +
+  return '<div class="allocation-flow"><section class="intro input-only"><h1 id="page-title">나눔교실 팀 배정</h1></section>' +
     conditionsView() +
-    '<section class="input-section input-only" aria-labelledby="input-title"><div class="flow-heading"><h2 id="input-title"><span class="flow-number">02</span>명단과 지망</h2><span class="small-muted" id="progress-text">' + completed + " / " + state.volunteers.length + '명 입력 완료</span></div>' +
+    '<section class="input-section input-only" aria-labelledby="input-title"><div class="flow-heading"><h2 id="input-title"><span class="flow-number">02</span>명단 입력</h2><span class="small-muted" id="progress-text">' + completed + " / " + state.volunteers.length + '명 입력 완료</span></div>' +
     '<div class="import-zone" id="import-zone">' + icon("upload") + '<div class="import-description"><strong>엑셀에서 복사한 내용을 이름 칸에 바로 붙여넣으세요.</strong><p id="paste-instructions">이름 한 열 또는 이름·1지망·2지망' + (modeCount() === 3 ? "·3지망" : "") + ' 표를 복사한 뒤 ⌘V / Ctrl+V · CSV 파일을 여기에 놓아도 돼요.</p></div><div class="import-actions"><button class="button compact" data-action="import">파일 선택</button><button class="text-button" data-action="paste">붙여넣기 창</button><button class="text-button" data-action="template">입력 양식</button></div></div>' +
-    noticeMarkup() +
+    preferenceModeView() + noticeMarkup() +
     '<div class="card roster-card"><div class="table-scroll roster-scroll" tabindex="0" role="region" aria-label="명단 입력 표. 이름 칸을 클릭하고 엑셀 내용을 붙여넣을 수 있습니다."><table class="input-table preference-table ' + (modeCount() === 3 ? "mode-three" : "") + '"><thead><tr><th class="number-col" scope="col">번호</th><th scope="col">이름 <span class="required">*</span></th>' +
-    Array.from({length:modeCount()},(_,index) => '<th scope="col">' + (index + 1) + "지망 " + (index ? '<span class="optional">선택</span>' : '<span class="required">*</span>') + "</th>").join("") +
-    "</tr></thead><tbody>" + state.volunteers.map((row,index) => '<tr><th scope="row" class="row-number">' + String(index + 1).padStart(2,"0") + '</th><td class="name-input"><input autocomplete="off" type="text" maxlength="100" data-index="' + index + '" data-field="name" aria-label="' + (index + 1) + '번 이름" aria-describedby="paste-instructions" placeholder="이름 입력 또는 붙여넣기" value="' + escape(row.name) + '"/></td>' +
+    Array.from({length:modeCount()},(_,index) => '<th scope="col">' + (index + 1) + "지망" + "</th>").join("") +
+    "</tr></thead><tbody>" + state.volunteers.map((row,index) => '<tr><th scope="row" class="row-number">' + String(index + 1).padStart(2,"0") + '</th><td class="name-input"><input autocomplete="off" type="text" maxlength="100" data-index="' + index + '" data-field="name" aria-label="' + (index + 1) + '번 이름" aria-describedby="paste-instructions" placeholder="이름" value="' + escape(row.name) + '"/></td>' +
       Array.from({length:modeCount()},(_,rank) => preferenceCell(row,index,rank + 1)).join("") + "</tr>").join("") +
     '</tbody></table></div><div class="card-bottom"><span class="small-muted">클릭한 이름 칸부터 아래로 입력돼요. 이름만 붙여넣으면 기존 지망은 유지돼요.</span></div></div>' +
     '<div class="action-bar"><div class="tool-buttons"><button class="button" data-action="save-input">' + icon("download") + '명단 저장</button><button class="text-button muted" data-action="clear">명단 비우기</button></div><button class="button primary" id="allocate-button" data-action="allocate">' + (state.result ? "다시 배정하기" : "배정하기") + icon("arrow") + '</button></div><p class="bottom-hint">' + icon("shield") + '자동 저장은 이 브라우저에서만 유지됩니다. 중요한 명단은 CSV로 저장해 주세요.</p></section>' +
@@ -188,23 +197,37 @@ function resultView() {
     '</tbody></table></div></section><p class="bottom-hint">1지망 0점 · 2지망 1점' + (ranks === 3 ? " · 3지망 2점" : "") + " · 미지망 10점으로 계산합니다. 미지망 배정도 발생할 수 있습니다.</p>";
 }
 
-function settingsView() {
-  return '<section class="intro"><div class="eyebrow">기본 설정</div><h1 id="page-title">과목을 관리해요.</h1><p>과목 이름과 받을 지망 수를 정해 주세요. 인원과 정원은 팀 배정 화면에서 바꿀 수 있어요.</p></section>' + noticeMarkup() +
-    '<div class="settings-grid"><section class="card"><div class="card-heading"><div><h2>과목 목록</h2><p>이름을 바꿔도 기존 지망 선택은 같은 과목으로 이어집니다.</p></div></div><div class="settings-table"><table><thead><tr><th scope="col">과목 이름</th><th scope="col"><span class="sr-only">삭제</span></th></tr></thead><tbody>' +
+function programEditorView() {
+  if (!state.draft) return '<div id="program-editor" hidden></div>';
+  return '<section class="program-editor" id="program-editor" aria-labelledby="program-editor-title"><h3 id="program-editor-title">과목 편집</h3><p class="flow-help">이름을 바꿔도 기존 지망 선택은 같은 과목으로 이어져요.</p><p id="program-error" class="editor-error" role="alert" tabindex="-1"></p><div class="settings-table"><table><thead><tr><th scope="col">과목 이름</th><th scope="col"><span class="sr-only">삭제</span></th></tr></thead><tbody>' +
     state.draft.programs.map((program,index) => '<tr><td><input data-program="' + index + '" data-setting="name" type="text" maxlength="40" aria-label="' + (index+1) + '번째 과목 이름" placeholder="과목 이름" value="' + escape(program.name) + '"/></td><td><button class="icon-button" data-action="remove-program" data-program="' + index + '" aria-label="' + (index+1) + '번째 과목 삭제" ' + (state.draft.programs.length === 1 ? "disabled" : "") + ">" + icon("trash") + "</button></td></tr>").join("") +
-    '</tbody></table></div><div class="settings-total"><button class="text-button" data-action="add-program">' + icon("plus") + '과목 추가</button><span>최대 ' + MAX_VOLUNTEERS + '개</span></div></section><section class="card preference-card"><div class="card-heading"><div><h2>받을 지망 수</h2><p>봉사자에게 몇 지망까지 받을까요?</p></div></div><div class="mode-options">' +
-    [["two","1~2지망","두 가지 선호를 받습니다"],["three","1~3지망","세 가지 선호를 받습니다"]].map(([mode,label,description]) => '<label class="mode-option"><input type="radio" name="preference-mode" value="' + mode + '" ' + (state.draft.preference_mode === mode ? "checked" : "") + '/><span><strong>' + label + "</strong><small>" + description + "</small></span></label>").join("") +
-    '</div><div class="settings-tip">' + icon("help") + '<p>1지망은 필수이며, 나머지 지망은 선택입니다. 배정은 전체 비용의 합을 기준으로 합니다.</p></div></section></div><div class="action-bar"><button class="button" data-action="cancel-settings">취소</button><button class="button primary" data-action="save-settings">설정 적용' + icon("check") + "</button></div>";
+    '</tbody></table></div><div class="program-editor-actions"><button class="text-button" data-action="add-program">' + icon("plus") + '과목 추가</button><div class="tool-buttons"><button class="button compact" data-action="cancel-programs">취소</button><button class="button primary compact" data-action="save-programs">편집 완료</button></div></div></section>';
+}
+
+function preferenceModeView() {
+  return '<div class="preference-mode-row"><span id="preference-mode-label" class="flow-label">받을 지망 수</span><fieldset class="preference-mode-picker" aria-labelledby="preference-mode-label"><legend class="sr-only">받을 지망 수</legend>' +
+    [["two","1~2지망"],["three","1~3지망"]].map(([mode,label]) => '<label><input type="radio" name="preference-mode" value="' + mode + '" ' + (state.config.preference_mode === mode ? "checked" : "") + '/><span>' + label + "</span></label>").join("") +
+    '</fieldset></div>';
+}
+
+function aboutView() {
+  const emailUrl = "mailto:" + SUPPORT_EMAIL + "?subject=" + encodeURIComponent("[나눔교실 팀 배정] 오류 제보 및 건의");
+  return '<article class="about-view"><header class="intro"><h1 id="page-title">서비스 소개</h1><p>나눔교실 봉사자의 지망을 바탕으로, 과목별 정원에 맞춰 팀을 배정하는 도구입니다.</p></header>' + noticeMarkup() +
+    '<section class="about-section" aria-labelledby="about-allocation-title"><h2 id="about-allocation-title">배정 기준</h2><p>과목별 정원만큼 자리를 만들고, 한 사람에게 한 자리씩 배정합니다. 헝가리안 알고리즘으로 전체 배정 비용의 합이 가장 작은 조합을 찾습니다.</p>' +
+    '<div class="about-costs"><div><span>1지망</span><strong>0점</strong></div><div><span>2지망</span><strong>1점</strong></div><div><span>3지망</span><strong>2점</strong></div><div><span>미지망</span><strong>10점</strong></div></div>' +
+    '<p class="small-muted">3지망은 받을 지망 수를 1~3지망으로 정했을 때만 반영합니다.</p><ul><li>특정 과목에 지망이 몰리면 미지망 배정이 발생할 수 있습니다.</li><li>1지망 인원 최대화나 미지망 인원 최소화를 각각 별도로 보장하지는 않습니다.</li><li>최적 조합이 여러 개라면 입력 순서와 과목 순서에 따라 그중 하나를 선택합니다.</li><li>현재 전공과 경력은 배정 계산에 반영하지 않습니다.</li></ul><p>최대 ' + MAX_VOLUNTEERS + '명을 지원하며, 사용할 과목마다 최소 한 명의 정원이 필요합니다.</p></section>' +
+    '<section class="about-section" aria-labelledby="about-data-title"><h2 id="about-data-title">명단 보관</h2><p>명단과 배정 계산은 브라우저에서 처리하며, 명단을 서버로 전송하지 않습니다. 설정과 입력은 해당 브라우저에 자동 저장됩니다.</p><p>브라우저 데이터를 삭제하거나 다른 브라우저를 사용하면 유지되지 않으므로, 중요한 명단은 CSV로 보관해 주세요.</p></section>' +
+    '<section class="about-section" aria-labelledby="about-use-title"><h2 id="about-use-title">이용 안내</h2><p>비상업적인 목적으로 무료 사용·수정·재배포할 수 있습니다. 상업적 이용은 사전 허가가 필요합니다. 자세한 조건은 <a href="./LICENSE.txt" target="_blank" rel="noopener">이용 허가서</a>를 확인해 주세요.</p><div class="about-links"><a href="https://github.com/largeq/nanoome-teams" target="_blank" rel="noopener noreferrer">소스 코드</a></div></section>' +
+    '<section class="about-section" aria-labelledby="about-feedback-title"><h2 id="about-feedback-title">오류 제보 및 건의</h2><p>오류 제보, 개선 건의, 사용 후기는 GitHub 또는 이메일로 보내 주세요.</p><div class="about-links"><a href="https://github.com/largeq/nanoome-teams/issues" target="_blank" rel="noopener noreferrer">GitHub에 남기기</a><a href="' + escape(emailUrl) + '">이메일: ' + escape(SUPPORT_EMAIL) + '</a></div></section></article>';
 }
 
 function dialogs() {
   return '<input id="csv-file" class="hidden" type="file" accept=".csv,.tsv,.txt,text/csv,text/tab-separated-values"/>' +
-    '<dialog id="help-dialog" aria-labelledby="help-title"><div class="dialog-top"><h2 id="help-title">어떻게 배정하나요?</h2><button class="icon-button" data-action="close-dialog" aria-label="배정 기준 닫기">×</button></div><div class="dialog-content"><p>과목별 정원만큼 자리를 만들고, 나누미 한 사람에게 한 자리씩 배정합니다.</p><div class="cost-list"><span>1지망 <strong>0점</strong></span><span>2지망 <strong>1점</strong></span><span>3지망 <strong>2점</strong></span><span>미지망 <strong>10점</strong></span></div><p><strong>헝가리안 알고리즘</strong>으로 전체 점수의 합이 가장 작은 조합을 찾습니다. 3지망 점수는 3지망 설정에서만 사용합니다.</p><p>지망이 몰리면 미지망 배정도 발생할 수 있습니다. 현재 전공이나 경력은 계산에 반영하지 않습니다.</p><p>최소 점수가 같은 조합이 여러 개면 그중 하나를 선택합니다. 1지망 인원 최대화나 미지망 인원 최소화를 각각 보장하지 않습니다.</p><p class="small-muted">최대 30명이며, 선택한 과목마다 최소 한 명의 정원이 필요합니다.</p></div><div class="dialog-actions"><button class="button primary" data-action="close-dialog">알겠습니다</button></div></dialog>' +
     '<dialog id="paste-dialog" aria-labelledby="paste-title"><div class="dialog-top"><h2 id="paste-title">명단 붙여넣기</h2><button class="icon-button" data-action="close-dialog" aria-label="붙여넣기 닫기">×</button></div><div class="dialog-content"><p id="paste-description">이름만 또는 이름·1지망·2지망' + (modeCount() === 3 ? "·3지망" : "") + ' 표를 붙여넣으세요. 제목 행도 함께 넣을 수 있습니다.</p><textarea id="paste-text" aria-label="붙여넣을 명단" aria-describedby="paste-description" rows="9" placeholder="엑셀에서 복사한 내용을 붙여넣으세요."></textarea><p class="small-muted">첫 번째 행부터 입력합니다. 이름 칸에 바로 붙여넣으면 선택한 행부터 입력할 수 있어요.</p><p id="paste-error" class="paste-error" role="alert"></p></div><div class="dialog-actions"><button class="button" data-action="close-dialog">취소</button><button class="button primary" data-action="apply-paste">명단에 적용</button></div></dialog>';
 }
 
 function render() {
-  root.innerHTML = '<div class="app-shell">' + sidebar() + '<main id="main" tabindex="-1"><header class="topbar"><span>나눔교실 <span class="breadcrumb">/</span> 팀 배정</span><button class="text-button" data-action="help">' + icon("help") + '배정 기준</button></header><div class="workspace">' + (state.tab === "input" ? inputView() : settingsView()) + '<footer class="page-footer"><span>각자의 마음을 모아, 함께하는 나눔교실.</span><nav class="footer-links" aria-label="이용 조건 및 의견"><a href="./LICENSE.txt" target="_blank" rel="noopener">비상업적 이용 조건</a><a href="https://github.com/largeq/nanoome-teams/issues" target="_blank" rel="noopener noreferrer">후기·의견</a></nav></footer></div></main></div>' + dialogs();
+  root.innerHTML = '<div class="app-shell">' + sidebar() + '<main id="main" tabindex="-1"><div class="workspace">' + (state.tab === "input" ? inputView() : aboutView()) + '<footer class="page-footer"><span class="creator-credit"><strong>제작</strong> 프로네시스 나눔실천단 38기 재무부장 정근규</span><nav class="footer-links" aria-label="이용 조건 및 의견"><a href="./LICENSE.txt" target="_blank" rel="noopener">비상업적 이용 조건</a><a href="https://github.com/largeq/nanoome-teams/issues" target="_blank" rel="noopener noreferrer">후기·의견</a></nav></footer></div></main></div>' + dialogs();
   renderNotice();
 }
 
@@ -213,11 +236,14 @@ function refreshResult() {
   if (section) section.innerHTML = resultView();
 }
 
-function settingsSnapshot() { return { programs: clone(state.programs), preference_mode: state.config.preference_mode }; }
+function hasProgramEdits() {
+  const names = (programs) => programs.map(({ key, name }) => ({ key, name }));
+  return state.draft && JSON.stringify(names(state.draft.programs)) !== JSON.stringify(names(state.programs));
+}
 function switchTab(tab) {
-  if (!["input","settings"].includes(tab) || tab === state.tab) return;
-  if (state.tab === "settings" && JSON.stringify(state.draft) !== JSON.stringify(settingsSnapshot()) && !confirm("아직 적용하지 않은 설정이 있습니다. 변경 내용을 버리고 이동할까요?")) return;
-  state.tab = tab; state.notice = null; state.draft = tab === "settings" ? settingsSnapshot() : null;
+  if (!["input","about"].includes(tab) || tab === state.tab) return;
+  if (hasProgramEdits() && !confirm("아직 적용하지 않은 과목 편집 내용이 있습니다. 변경 내용을 버리고 이동할까요?")) return;
+  state.tab = tab; state.notice = null; state.draft = null;
   render(); document.querySelector("#main").focus({ preventScroll: true }); window.scrollTo({ top: 0 });
 }
 
@@ -235,26 +261,18 @@ function commitLayout(message) {
   changed(); save(); render(); notify(message,"info");
 }
 
-function changeCount(value) {
-  const count = Number(value), minimum = enabledPrograms().length;
-  if (!Number.isInteger(count) || count < minimum || count > MAX_VOLUNTEERS) {
-    render(); throw new InputError(["선택한 과목마다 한 명 이상의 정원이 필요합니다. 배정 인원을 " + minimum + "~" + MAX_VOLUNTEERS + "명의 정수로 입력해 주세요."]);
-  }
-  if (count === state.volunteers.length) return;
-  const dropped = state.volunteers.slice(count).filter(rowHasInput).length;
-  if ((dropped || state.capacityMode === "manual") && !confirm((dropped ? "마지막 " + dropped + "명의 입력 내용이 삭제됩니다. " : "") + "과목별 정원도 새 인원에 맞춰 다시 나눕니다. 인원을 변경할까요?")) { render(); return; }
-  state.volunteers = state.volunteers.slice(0,count);
-  while (state.volunteers.length < count) state.volunteers.push(normalizeVolunteer({}));
-  redistribute(); commitLayout("배정 인원을 " + count + "명으로 바꾸고 과목별 정원을 다시 나눴습니다.");
-}
-
 function changeCapacity(index, value) {
   const program = state.programs[index], count = Number(value);
   if (!program?.enabled || !Number.isInteger(count) || count < 1 || count > MAX_VOLUNTEERS ||
     totalCapacity(state.config) - program.capacity + count > MAX_VOLUNTEERS) {
     render(); throw new InputError(["정원은 1명 이상, 전체 정원 합계는 " + MAX_VOLUNTEERS + "명 이하로 입력해 주세요."]);
   }
-  program.capacity = count; state.capacityMode = "manual"; syncConfig();
+  if (program.capacity === count) return;
+  const capacity = totalCapacity(state.config) - program.capacity + count;
+  const warning = removedRowsMessage(capacity);
+  if (warning && !confirm(warning + "\n정원을 변경할까요?")) { render(); return; }
+  program.capacity = count; syncConfig();
+  state.volunteers = resizeVolunteers(capacity);
   changed(); save(); render();
 }
 
@@ -262,26 +280,23 @@ function toggleProgram(index) {
   const program = state.programs[index];
   if (!program) return;
   if (program.enabled && enabledPrograms().length === 1) throw new InputError(["배정할 과목은 하나 이상 선택해 주세요."]);
-  if (!program.enabled && enabledPrograms().length >= state.volunteers.length) throw new InputError(["추가할 과목에도 한 명 이상의 정원이 필요합니다. 배정 인원을 먼저 늘려 주세요."]);
+  const capacity = totalCapacity(state.config) + (program.enabled ? -program.capacity : program.capacity);
+  if (capacity > MAX_VOLUNTEERS) throw new InputError(["이 과목을 포함하면 총 " + capacity + "명입니다. 다른 과목의 정원을 줄여 합계를 " + MAX_VOLUNTEERS + "명 이하로 맞춰 주세요."]);
   const affected = program.enabled ? state.volunteers.filter((row) => ["pref1","pref2","pref3"].some((field) => row[field] === program.name)).length : 0;
-  if ((affected || state.capacityMode === "manual") && !confirm((affected ? "이 과목을 선택한 " + affected + "명의 지망 선택이 해제됩니다. " : "") + "과목별 정원도 다시 나눕니다. 배정 과목을 바꿀까요?")) return;
+  const messages = [removedRowsMessage(capacity), affected ? "이 과목을 선택한 " + affected + "명의 지망 선택이 해제됩니다." : ""].filter(Boolean);
+  if (messages.length && !confirm(messages.join("\n") + "\n배정 과목을 바꿀까요?")) return;
   program.enabled = !program.enabled;
+  state.volunteers = resizeVolunteers(capacity);
   if (!program.enabled) state.volunteers.forEach((row) => ["pref1","pref2","pref3"].forEach((field) => { if (row[field] === program.name) row[field] = ""; }));
-  redistribute(); commitLayout("배정 과목을 바꾸고 정원을 다시 나눴습니다.");
+  syncConfig(); commitLayout("배정 과목을 변경했습니다. 총 " + capacity + "명입니다.");
 }
 
 function applyImport(text, startIndex = 0) {
   const scroll = document.querySelector(".roster-scroll")?.scrollTop ?? 0;
   const plan = planClipboardPaste(text, state.volunteers, state.config, startIndex);
-  const expanding = plan.count > state.volunteers.length;
-  if (plan.overwrittenCells || expanding) {
-    const messages = [];
-    if (plan.overwrittenCells) messages.push("기존 " + plan.overwrittenCells + "개 칸의 내용이 바뀝니다.");
-    if (expanding) messages.push("배정 인원을 " + plan.count + "명으로 늘리고 과목별 정원을 다시 나눕니다.");
-    if (!confirm(messages.join("\n") + "\n이 명단을 입력할까요?")) return false;
-  }
+  if (plan.count > totalCapacity(state.config)) throw new InputError(["이 위치부터 붙여넣으려면 총 " + plan.count + "명의 정원이 필요합니다. 위의 과목별 정원을 늘린 뒤 다시 붙여넣어 주세요."]);
+  if (plan.overwrittenCells && !confirm("기존 " + plan.overwrittenCells + "개 칸의 내용이 바뀝니다.\n이 명단을 입력할까요?")) return false;
   state.volunteers = plan.volunteers;
-  if (expanding) redistribute();
   changed(); save(); render();
   const table = document.querySelector(".roster-scroll");
   if (table) table.scrollTop = scroll;
@@ -302,14 +317,23 @@ async function importFile(file) {
   applyImport(text);
 }
 
-function saveSettings() {
-  const programs = clone(state.draft.programs).map((program) => ({ ...program, name: program.name.trim() }));
+function savePrograms() {
+  if (!hasProgramEdits()) {
+    state.draft = null; render();
+    document.querySelector('[data-action="edit-programs"]')?.focus({preventScroll:true});
+    return;
+  }
+  const programs = state.draft.programs.map((program) => ({
+    ...(state.programs.find((current) => current.key === program.key) ?? program),
+    name: program.name.trim(),
+  }));
   if (programs.some((program) => !program.name || program.name.length > 40) || new Set(programs.map((program) => program.name)).size !== programs.length) {
     throw new InputError(["과목 이름을 1~40자로 입력하고, 서로 중복되지 않게 정해 주세요."]);
   }
   const selected = programs.filter((program) => program.enabled);
   if (!selected.length) throw new InputError(["배정할 과목 하나는 남겨 주세요."]);
-  if (selected.length > state.volunteers.length) throw new InputError(["배정 인원보다 많은 과목을 선택할 수 없습니다."]);
+  const config = normalizeConfig({ preference_mode:state.config.preference_mode, subjects:selected.map(({name,capacity}) => ({name,capacity})) });
+  const capacity = totalCapacity(config);
   const byKey = new Map(programs.map((program) => [program.key,program.name]));
   const renamed = new Map(state.programs.map((program) => [program.name,byKey.get(program.key)]));
   const allowed = new Set(selected.map((program) => program.name));
@@ -317,24 +341,35 @@ function saveSettings() {
     const mapped = { ...row };
     for (const field of ["pref1","pref2","pref3"]) mapped[field] = renamed.get(mapped[field]) ?? "";
     for (const field of ["pref1","pref2","pref3"]) if (mapped[field] && !allowed.has(mapped[field])) mapped[field] = "";
-    if (state.draft.preference_mode === "two") mapped.pref3 = "";
+    if (state.config.preference_mode === "two") mapped.pref3 = "";
     return mapped;
   });
-  const removedChoices = state.volunteers.reduce((sum,row,index) => sum + ["pref1","pref2","pref3"].filter((field) => row[field] && !next[index][field]).length,0);
-  if (removedChoices && !confirm("과목 삭제 또는 지망 수 변경으로 " + removedChoices + "개의 지망 선택이 해제됩니다. 설정을 적용할까요?")) return;
-  const selectionChanged = JSON.stringify(enabledPrograms().map((program) => program.key)) !== JSON.stringify(selected.map((program) => program.key));
-  if (selectionChanged) selected.forEach((program,index) => {
-    program.capacity = Math.floor(next.length / selected.length) + (index < next.length % selected.length ? 1 : 0);
-  });
-  const config = normalizeConfig({ preference_mode:state.draft.preference_mode, subjects:selected.map(({name,capacity}) => ({name,capacity})) });
-  state.config = config; state.programs = programs; state.volunteers = next;
-  if (selectionChanged) state.capacityMode = "auto";
-  changed(); state.draft = null; state.tab = "input"; save(); render();
-  notify("설정을 적용했습니다. 과목 이름을 바꾼 경우 기존 지망도 새 이름으로 이어집니다.","info");
+  const removedChoices = state.volunteers.slice(0,capacity).reduce((sum,row,index) => sum + ["pref1","pref2","pref3"].filter((field) => row[field] && !next[index][field]).length,0);
+  const messages = [removedRowsMessage(capacity), removedChoices ? "과목 삭제로 " + removedChoices + "개의 지망 선택이 해제됩니다." : ""].filter(Boolean);
+  if (messages.length && !confirm(messages.join("\n") + "\n과목 편집 내용을 적용할까요?")) return;
+  state.config = config; state.programs = programs; state.volunteers = resizeVolunteers(capacity,next);
+  changed(); state.draft = null; save(); render();
+  document.querySelector('[data-action="edit-programs"]')?.focus({preventScroll:true});
+  notify("과목 편집을 적용했습니다. 이름을 바꾼 과목의 지망 선택도 이어집니다.","info");
+}
+
+function changePreferenceMode(mode) {
+  if (!["two","three"].includes(mode) || mode === state.config.preference_mode) return;
+  const scroll = document.querySelector(".roster-scroll")?.scrollTop ?? 0;
+  const thirdChoices = state.volunteers.filter((row) => row.pref3).length;
+  if (mode === "two" && thirdChoices && !confirm("입력한 3지망 " + thirdChoices + "개가 삭제됩니다. 이름과 1·2지망은 유지됩니다.\n1~2지망으로 바꿀까요?")) {
+    document.querySelector('input[name="preference-mode"][value="' + state.config.preference_mode + '"]').checked = true;
+    return;
+  }
+  state.config.preference_mode = mode;
+  if (mode === "two") state.volunteers.forEach((row) => { row.pref3 = ""; });
+  changed(); save(); render();
+  const table = document.querySelector(".roster-scroll");
+  if (table) table.scrollTop = scroll;
+  document.querySelector('input[name="preference-mode"][value="' + mode + '"]')?.focus({preventScroll:true});
 }
 
 const actions = {
-  help: () => document.querySelector("#help-dialog").showModal(),
   paste: () => { document.querySelector("#paste-error").textContent = ""; document.querySelector("#paste-dialog").showModal(); },
   "close-dialog": (button) => button.closest("dialog").close(),
   dismiss: () => { state.notice = null; renderNotice(); },
@@ -367,15 +402,16 @@ const actions = {
   },
   step: (button) => {
     const index = Number(button.dataset.program), delta = Number(button.dataset.delta);
-    if (button.dataset.control === "count") changeCount(state.volunteers.length + delta);
-    else changeCapacity(index,state.programs[index].capacity + delta);
+    changeCapacity(index,state.programs[index].capacity + delta);
   },
-  balance: () => { redistribute(); commitLayout("과목별 정원을 균등하게 나눴습니다."); },
   "toggle-program": (button) => toggleProgram(Number(button.dataset.program)),
-  "clear-preference": (button) => {
-    const index = Number(button.dataset.index), field = button.dataset.field;
-    state.volunteers[index][field] = ""; changed(); scheduleSave();
-    updatePreferenceControls(index); updateProgress();
+  "edit-programs": () => {
+    state.draft = {programs:clone(state.programs)};
+    render(); document.querySelector('[data-setting="name"]')?.focus({preventScroll:true});
+  },
+  "cancel-programs": () => {
+    state.draft = null; render();
+    document.querySelector('[data-action="edit-programs"]')?.focus({preventScroll:true});
   },
   "add-program": () => {
     if (state.draft.programs.length >= MAX_VOLUNTEERS) throw new InputError(["과목은 최대 " + MAX_VOLUNTEERS + "개까지 만들 수 있습니다."]);
@@ -384,21 +420,35 @@ const actions = {
   },
   "remove-program": (button) => {
     const index = Number(button.dataset.program), program = state.draft.programs[index];
-    if (program.enabled && state.draft.programs.filter((item) => item.enabled).length === 1) throw new InputError(["배정할 과목 하나는 남겨 주세요."]);
+    if (state.programs.some((current) => current.key === program.key && current.enabled) &&
+      !state.draft.programs.some((item) => item.key !== program.key && state.programs.some((current) => current.key === item.key && current.enabled))) throw new InputError(["배정할 과목 하나는 남겨 주세요."]);
     if (state.draft.programs.length > 1) state.draft.programs.splice(index,1);
     render();
   },
-  "cancel-settings": () => { state.draft = settingsSnapshot(); switchTab("input"); },
-  "save-settings": saveSettings,
+  "save-programs": savePrograms,
 };
 
 root.addEventListener("click",(event) => {
+  const element = event.target;
+  // Native radios are already checked when click fires; compare the saved choice.
+  if (element.matches('input[type="radio"][data-field]') && !element.disabled &&
+    state.volunteers[Number(element.dataset.index)][element.dataset.field] === element.value) {
+    element.checked = false;
+    updateVolunteer(element);
+    return;
+  }
   const button = event.target.closest("[data-action], [data-tab]");
   if (!button || button.disabled) return;
   try {
     if (button.dataset.tab) switchTab(button.dataset.tab);
     else actions[button.dataset.action]?.(button);
-  } catch(error) { notify(error instanceof InputError ? error.messages : "처리 중 문제가 발생했습니다. 입력 내용을 확인하고 다시 시도해 주세요."); }
+  } catch(error) {
+    const messages = error instanceof InputError ? error.messages : ["처리 중 문제가 발생했습니다. 입력 내용을 확인하고 다시 시도해 주세요."];
+    const editorError = document.querySelector("#program-error");
+    if (editorError && ["add-program","remove-program","save-programs"].includes(button.dataset.action)) {
+      editorError.textContent = messages.join("\n"); editorError.focus();
+    } else notify(messages);
+  }
 });
 
 function updateProgress() {
@@ -412,11 +462,10 @@ function updatePreferenceControls(index) {
     radio.checked = row[radio.dataset.field] === radio.value;
     radio.disabled = ["pref1","pref2","pref3"].some((field,rank) => rank < modeCount() && field !== radio.dataset.field && row[field] === radio.value);
   });
-  root.querySelectorAll('[data-action="clear-preference"][data-index="' + index + '"]').forEach((button) => { button.disabled = !row[button.dataset.field]; });
 }
 function updateVolunteer(element) {
   const index = Number(element.dataset.index);
-  state.volunteers[index][element.dataset.field] = element.value;
+  state.volunteers[index][element.dataset.field] = element.type === "radio" && !element.checked ? "" : element.value;
   changed(); scheduleSave(); updateProgress();
   if (element.type === "radio") updatePreferenceControls(index);
 }
@@ -428,10 +477,9 @@ root.addEventListener("input",(event) => {
 root.addEventListener("change",async (event) => {
   const element = event.target;
   try {
-    if (element.dataset.field && element.type === "radio") updateVolunteer(element);
-    if (element.dataset.control === "count" && element.tagName === "INPUT") changeCount(element.value);
+    if (element.dataset.field && element.type === "radio" && element.checked) updateVolunteer(element);
     if (element.dataset.control === "capacity" && element.tagName === "INPUT") changeCapacity(Number(element.dataset.program),element.value);
-    if (element.name === "preference-mode") state.draft.preference_mode = element.value;
+    if (element.name === "preference-mode") changePreferenceMode(element.value);
     if (element.id === "csv-file") {
       try { await importFile(element.files[0]); } finally { element.value = ""; }
     }
@@ -448,6 +496,14 @@ root.addEventListener("paste",(event) => {
   catch(error) { notify(error instanceof InputError ? error.messages : "엑셀에서 복사한 이름 또는 표를 확인해 주세요."); }
 });
 root.addEventListener("keydown",(event) => {
+  const element = event.target;
+  if (event.key === " " && element.matches('input[type="radio"][data-field]')) {
+    event.preventDefault();
+    if (element.disabled || event.repeat) return;
+    element.checked = state.volunteers[Number(element.dataset.index)][element.dataset.field] !== element.value;
+    updateVolunteer(element);
+    return;
+  }
   if (event.target.dataset.field !== "name" || event.altKey || event.ctrlKey || event.metaKey || !["ArrowUp","ArrowDown","Enter"].includes(event.key)) return;
   const index = Number(event.target.dataset.index) + (event.key === "ArrowUp" ? -1 : 1);
   const input = root.querySelector('[data-index="' + index + '"][data-field="name"]');
